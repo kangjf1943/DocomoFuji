@@ -1,0 +1,104 @@
+---
+title: "Values of Fujisan trailheads"
+author: "Kang"
+format: html
+editor: visual
+---
+
+Travel cost model was used to calculate the values (per trip consumer surplus and total consumer surplus) of Fujisan trailheads. The regression form "ln(visiting rate) = alpha + beta \* travel cost" was applied. So the per trip consumer surplus = - 1 / beta. This value, however, varies by model. So when we construct the model by different resolution or different calculation in the method, the result changes.
+
+In this analysis, I used prefecture-level DOCOMO data, which gives the visitor number of each prefecture to the meshes of Fujisan. I filtered the data to keep only the data related to the meshes of trailheads. It should be noted that, the DOCOMO data does not cover all the trailheads - Gotemba trailhead is out of the range. So we can only calculate the values for the other three heads.
+
+```{r}
+tm_shape(docomo_all_mesh) + 
+  tm_polygons() + 
+  tm_shape(trailhead) + 
+  tm_dots(size = 0.5, col = "red4") + 
+  tm_text(text = "head", just = "right")
+```
+
+A sample of the current raw data looks like this:
+
+```{r}
+knitr::kable(head(docomo_head, 20))
+```
+
+I then grouped the data by year, month, and day respectively and applied travel cost mode. For example, under "year" resolution, each row in the data indicates the visitor number coming from a prefecture to a trailhead in one year.
+
+For the visitor number calculation, I used two methods. The first one is "max". I assumed a zero-turnover-rate and took the max mesh population number in one day as the total visitor number of that day. The second is "sum". A 100%-turnover-rate was assumed and the sum of hourly population number of the day was thought to be the population number of that day.
+
+Therefore, we have 3 resolutions x 2 methods results. Now we will compare the results under different conditions.
+
+Before applying the travel cost mode, let's take a look at the relationship between visiting rate and travel cost under different time scales and visiting population counting method.
+
+```{r}
+ggplot(reg_raw, aes(trv_cost, log(vis_rate))) + 
+  geom_point(aes(col = res, size = size), alpha = 0.9) + 
+  geom_smooth(aes(col = res), method = "lm", se = FALSE, alpha = 0.5) + 
+  facet_grid(vis_pop_method ~ head) + 
+  theme_bw() + 
+  labs(x = "Travel cost", y = "Ln(visiting rate)")
+```
+
+The flatter the line is, the higher the per trip consumer surplus (CS). Now we compare the valuation results under different conditions.
+
+The calculation results.
+
+```{r}
+knitr::kable(select(head_val, -demand_model, -all_coef))
+```
+
+And figures. Though per trip CS is higher under "max" method, the total CS of "max" method is lower because the population of "sum" method is higher. From a perspective of time resolution, we can see that usually "year" results are higher than "month" results, and "day" results are lowest. The population under different time resolutions are the same, because it is equal to the sum of daily visitor number not matter which time resolution it is.
+
+```{r}
+# Compare values and population under different time scales and visiting population counting methods. 
+ggplot(head_val) + 
+  geom_point(aes(head, avg_cs, col = res)) + 
+  facet_grid(.~ method) + 
+  theme_bw() + 
+  labs(x = "", y = "Per trip CS")
+ggplot(head_val) + 
+  geom_point(aes(head, tot_cs, col = res)) + 
+  facet_grid(.~ method) + 
+  theme_bw() + 
+  labs(x = "", y = "Total CS")
+ggplot(head_val) + 
+  geom_point(aes(head, vis_pop, col = res)) + 
+  facet_grid(.~ method) + 
+  theme_bw() + 
+  labs(x = "", y = "Visiting population")
+```
+
+The expected output, as we discussed, is a boxplot showing the quantiles of daily total CS. The total CS of a day = per trip CS x visitor number of the day. For the per trip CS, we have 6 different choices (3 time resolutions x 2 methods). Here I used "day" resolution x "max" method, and "day" resolution x "sum" method respectively.
+
+```{r}
+# Use day*max per trip CS. 
+docomo_head %>% 
+  group_by(head, date) %>% 
+  summarise(vis_pop = max(vis_pop), .groups = "drop") %>% 
+  left_join(
+    filter(head_val, res == "day", method == "max") %>% 
+      select(head, avg_cs), 
+    by = "head"
+  ) %>% 
+  mutate(tot_cs = avg_cs * vis_pop) %>% 
+  ggplot(aes(head, tot_cs)) + 
+  geom_boxplot() + 
+  geom_jitter()
+```
+
+```{r}
+# Use day*sum per trip CS. 
+docomo_head %>% 
+  group_by(head, date) %>% 
+  summarise(vis_pop = sum(vis_pop), .groups = "drop") %>% 
+  left_join(
+    filter(head_val, res == "day", method == "sum") %>% 
+      select(head, avg_cs), 
+    by = "head"
+  ) %>% 
+  mutate(tot_cs = avg_cs * vis_pop) %>% 
+  ggplot(aes(head, tot_cs)) + 
+  geom_boxplot() + 
+  geom_jitter()
+```
