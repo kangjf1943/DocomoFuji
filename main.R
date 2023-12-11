@@ -105,6 +105,7 @@ get_reg_raw <- function(x, res, vis_pop_method) {
     left_join(osrm_res, by = c("head", "prefname" = "src_loc")) %>% 
     left_join(prefpop, by = c("prefcode" = "pref_code")) %>% 
     mutate(vis_rate = vis_pop / pop) %>% 
+    rename("res" = "get(res)") %>% 
     return()
 }
 
@@ -193,6 +194,13 @@ ggplot(head_val) +
   theme_bw() + 
   labs(x = "", y = "Visiting population")
 
+# Box plot for daily travel cost. 
+reg_raw %>% 
+  filter(res == "day") %>% 
+  mutate(tot_trv_cost = trv_cost * vis_pop) %>% 
+  ggplot() + 
+  geom_point()
+
 # Box plot for daily total CS. 
 # Use day*max per trip CS. 
 docomo_head %>% 
@@ -221,4 +229,89 @@ docomo_head %>%
   ggplot(aes(head, tot_cs)) + 
   geom_boxplot() + 
   geom_jitter()
+
+# Get daily travel cost ----
+# Holiday data. 
+holiday <- read.csv("data_raw/Japan_holiday_2016.csv") %>%
+  mutate(
+    year = 2016, month = substr(.$月日, 1, 2), day  = substr(.$月日, 4, 5)
+  ) %>% 
+  rename(holiday_name = 名称) %>%
+  mutate(date = as.Date(paste(year, month, day, sep = "-"))) %>%
+  dplyr::select(date, holiday_name)
+
+# Function to get boxplot raw data. 
+get_box_raw <- function(x, vis_pop_method) {
+  if (vis_pop_method == "sum") {
+    x_grp <- x %>% 
+      group_by(date, month, head, mesh, prefcode) %>% 
+      summarise(vis_pop = sum(vis_pop), .groups = "drop")
+  } else if (vis_pop_method == "max") {
+    x_grp <- x %>% 
+      group_by(date, month, head, mesh, prefcode) %>% 
+      summarise(vis_pop = max(vis_pop), .groups = "drop")
+  }
+  x_grp %>% 
+    group_by(date, month, head, mesh, prefcode) %>% 
+    # Add distance. 
+    left_join(prefcode, by = "prefcode") %>% 
+    left_join(osrm_res, by = c("head", "prefname" = "src_loc")) %>% 
+    left_join(prefpop, by = c("prefcode" = "pref_code")) %>% 
+    left_join(holiday, by = "date") %>% 
+    group_by(date, month, head, holiday_name) %>% 
+    summarise(trv_cost = sum(trv_cost)) %>% 
+    return()
+}
+# Method by "sum" and by "max", color by month or weekday. 
+library(patchwork)
+
+(
+  (
+    get_box_raw(docomo_head, "sum") %>% 
+      ggplot(aes(head, trv_cost)) + 
+      geom_boxplot() + 
+      geom_jitter(
+        aes(col = as_factor(month)), width = 0.2, height = 100, alpha = 0.5
+      ) + 
+      labs(col = "Month", x = "", y = "Travel cost", title = "Sum-Month")
+  ) | (
+    get_box_raw(docomo_head, "sum") %>% 
+      mutate(weekday = weekdays(date)) %>% 
+      mutate(weekday = case_when(
+        weekday == "Saturday" | weekday == "Sunday" | !is.na(holiday_name) ~ 
+          "weekend/holiday", 
+        TRUE ~ "weekday"
+      )) %>% 
+      ggplot(aes(head, trv_cost)) + 
+      geom_boxplot() + 
+      geom_jitter(
+        aes(col = weekday), width = 0.2, height = 100, alpha = 0.5
+      ) + 
+      labs(col = "Weekday", x = "", y = "Travel cost", title = "Sum-Weekday")
+  )
+) / (
+  (
+    get_box_raw(docomo_head, "max") %>% 
+      ggplot(aes(head, trv_cost)) + 
+      geom_boxplot() + 
+      geom_jitter(
+        aes(col = as_factor(month)), width = 0.2, height = 100, alpha = 0.5
+      ) + 
+      labs(col = "Month", x = "", y = "Travel cost", title = "Max-Month")
+  ) | (
+    get_box_raw(docomo_head, "max") %>% 
+      mutate(weekday = weekdays(date)) %>% 
+      mutate(weekday = case_when(
+        weekday == "Saturday" | weekday == "Sunday" | !is.na(holiday_name) ~ 
+          "weekend/holiday", 
+        TRUE ~ "weekday"
+      )) %>% 
+      ggplot(aes(head, trv_cost)) + 
+      geom_boxplot() + 
+      geom_jitter(
+        aes(col = weekday), width = 0.2, height = 100, alpha = 0.5
+      ) + 
+      labs(col = "Weekday", x = "", y = "Travel cost", title = "Max-Weekday")
+  )
+)
 
